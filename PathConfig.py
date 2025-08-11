@@ -70,7 +70,7 @@ Steps
 from pathlib import Path
 
 # Auto-injected upstream: replace with the real experiment root before use
-pExperimentalRoot = Path("__EXP_ROOT__")
+pExperimentalRoot = Path("_PLACEHOLDER_EXPERIMENT_ROOT_")
 
 def _p(sub: str) -> Path:
     """Return a path under the experimental root."""
@@ -196,3 +196,4 @@ __all__ = [
     "EXPconfig", "BSconfig", "CDFconfig", "PARAMconfig",
     "COLORconfig", "TIMEconfig", "PATHconfig",
 ]
+
