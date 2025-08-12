@@ -32,30 +32,7 @@ Steps
 - Provide filename schema and experimental groups.
 """
 
-# General switches and alignment
-POSE_SCORING = True  # include pose-derived metrics from SLEAP
-ALIGNMENT_COL = "VisualStim"  # column with stimulus pulses (0→1 edges)
-
-# Stimulus expectations
-STIMULUS_NUMBER = 20                 # expected onsets per run
-STIMULUS_DURATION_SEC = 0.5          # stimulus length (sec)
-EXPECTED_STIMULUS = STIMULUS_NUMBER + 3  # extra events (e.g., lights-off)
-
-# Timing and arena
-FRAME_RATE = 60       # frames per second
-ARENA_WIDTH_MM = 30   # arena width (millimetres)
-ARENA_HEIGHT_MM = 30  # arena height (millimetres)
-
-# Periods (sec)
-EXPERIMENTAL_PERIODS = {
-    "Baseline": {"duration_sec": 300},
-    "Stimulation": {"duration_sec": 300},
-    "Recovery": {"duration_sec": 300},
-}
-
-# Filename and grouping metadata
-FILENAME_STRUCTURE = ["Experimenter", "Genotype", "Protocol", "Sex", "Age",
-                      "Setup", "Camera", "Date", "FlyID", "Extension"]
+#%% CELL 02 – EXPERIMENT CONFIG
 
 GROUP_IDENTIFIER = "Protocol"  # metadata field used for grouping runs
 
@@ -134,3 +111,4 @@ __all__ = ["POSE_SCORING",
            "frame_span_sec", "stimulus_duration_frames",
            "total_duration_frames", "EXPERIMENTAL_PERIODS",
            "FILENAME_STRUCTURE", "GROUP_IDENTIFIER", "EXPERIMENTAL_GROUPS"]
+
