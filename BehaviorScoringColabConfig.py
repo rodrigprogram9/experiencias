@@ -111,6 +111,12 @@ def load_configs(PathConfig) -> Tuple[Path, DrivePaths]:
     return drive_root, drive_paths
 
 
+def _require_csv_folder(folder: Path, message: str) -> None:
+    if not folder.exists():
+        raise RuntimeError(f"{message}: {folder} (folder not found)")
+    if not any(folder.rglob("*.csv")):
+        raise RuntimeError(f"{message}: {folder} (no CSV files found)")
+        
 def validate_inputs(
     drive_paths: DrivePaths, pose_scoring: Optional[bool] = None, *, verbose: bool = False
 ) -> bool:
@@ -261,6 +267,99 @@ def _copy_selected(src: Path, dst: Path, rel_files: List[str]) -> int:
             copied += 1
     return copied
 
+
+#%%% CELL 04A – FORMAT CONSTANTS & HELPERS
+"""
+Purpose
+Provide shared formatting helpers for consistent console output:
+- Banners at 75 chars
+- Content rows at 72 chars with 2-space indent
+- Dash-fill that starts 2 spaces after the longest label in the block and
+  ends 2 spaces before the value
+- Lettered duration formatting (MMmSSs or HHhMMm)
+- Center truncation for long values
+"""
+
+# Shared constants & rules (for implementation)
+BANNER_WIDTH = 75
+CONTENT_WIDTH = 72
+INDENT = "  "         # two spaces
+VALUE_SEP = "  "      # two spaces before/after value groups & '---'
+
+# Progress bar constants (not used in this cell, here for global consistency)
+BAR_TOTAL = 28        # includes brackets
+BAR_LEFT = "["
+BAR_RIGHT = "]"
+BAR_FILL = "#"
+BAR_EMPTY = "."
+
+def _banner(title: str) -> str:
+    t = title.strip().upper()
+    pad = max(BANNER_WIDTH - len(t) - 2, 0)
+    left = pad // 2
+    right = pad - left
+    return "=" * left + " " + t + " " + "=" * right
+
+def _truncate_left(s: str, max_len: int) -> str:
+    """Truncate string from the left, keeping the rightmost characters."""
+    s = str(s)
+    if len(s) <= max_len:
+        return s
+    if max_len <= 3:
+        return s[-max_len:]
+    return "..." + s[-(max_len - 3):]
+
+def _fmt_duration_lettered(seconds: float) -> str:
+    """
+    Return lettered duration:
+      - < 1h  -> 'MMmSSs'
+      - >=1h  -> 'HHhMMm'
+    Seconds are rounded to nearest second; minutes are rounded from the seconds.
+    """
+    s = int(round(max(seconds, 0)))
+    h, rem = divmod(s, 3600)
+    m, sec = divmod(rem, 60)
+    if h > 0:
+        # Round minutes from seconds (>=30s -> +1m)
+        if sec >= 30:
+            m = (m + 1) % 60
+            if m == 0:
+                h += 1
+        return f"{h:02d}h{m:02d}m"
+    return f"{m:02d}m{sec:02d}s"
+
+def _kv_line(label: str, value: str, longest_label: int) -> str:
+    """
+    Build a single content row (72 chars total):
+      '␣␣' + label + gap + dashes + '␣␣' + value
+    where
+      gap = (longest_label - len(label)) + 2  # 2 spaces after longest label
+    and the dash-fill ends 2 spaces before the value.
+    If value overflows, it's center-truncated to fit exactly 72 cols.
+    """
+    label = str(label)
+    value = str(value)
+
+    # Left part: indent + label + gap to align dash start
+    left = INDENT + label
+    gap = (max(longest_label - len(label), 0) + 2)
+    left += " " * gap
+
+    # Compute max space for value (2 spaces reserved before value)
+    max_value_len = CONTENT_WIDTH - len(left) - 2
+    v = _truncate_left(value, max_value_len)
+
+    # Dash-fill length so the final line ends exactly at CONTENT_WIDTH
+    dash_len = CONTENT_WIDTH - len(left) - 2 - len(v)
+    if dash_len < 0:
+        # (Shouldn't happen because we truncated v, but guard anyway)
+        v = _truncate_left(v, max_value_len + dash_len)
+        dash_len = max(CONTENT_WIDTH - len(left) - 2 - len(v), 0)
+
+    return left + ("-" * dash_len) + "  " + v
+
+
+
 #%%% CELL 05 – PLACEHOLDERS & WARMUP
 """
 Purpose
@@ -359,276 +458,115 @@ def _warmup_measure_speed_mbps(
         return None
     return (read_bytes / (1024 * 1024)) / elapsed
 
-#%%% CELL 06 – STAGING (ETA, PLACEHOLDERS, INPUT COPY)
+#%%% CELL 06 – STAGING (DISABLED: RUNS DIRECTLY ON DRIVE)
 """
 Purpose
-Stage inputs into local mirrors, print an ETA based on a brief warm-up, create
-placeholders for existing outputs, and return a concise summary.
+Disable staging entirely. The pipeline now reads inputs directly from Drive.
 
-Steps
-- Detect which inputs still need copying and estimate time.
-- Copy only pending inputs; touch placeholders for skipped items.
-- Mirror placeholders for existing outputs (Scored, Error).
-- Return StageSummary (no scoredpose entry).
+Output
+Return a StageSummary of zeros so calls won't break if this is invoked.
 """
+
+from dataclasses import dataclass
+from typing import Optional
 
 def stage_to_local(
     drive_paths: DrivePaths,
     local_paths: LocalPaths,
     pose_scoring: Optional[bool] = None,
     *,
-    verbose: bool = True
+    verbose: bool = False,
+    prior_speed_mbps: Optional[float] = None,
 ) -> StageSummary:
-    """Stage inputs selectively and mirror existing outputs as placeholders."""
-    # Auto-detect pose_scoring if not given
-    if pose_scoring is None:
-        pose_scoring = drive_paths.pose.exists() and any(drive_paths.pose.rglob("*.csv"))
+    """No-op: staging removed. Reads/writes happen directly on Drive."""
+    return StageSummary(tracked=0, pose=0, scored=0, error_items=0)
 
-    print("================= LOADING FILES FROM DRIVE =================")
 
-    # Gather all candidate inputs
-    tracked_files = _list_csvs(drive_paths.tracked)
-    total_tracked = len(tracked_files)
-
-    pose_files = _list_csvs(drive_paths.pose) if pose_scoring else []
-    total_pose = len(pose_files) if pose_scoring else 0
-
-    # Build worklist for tracked files: only unprocessed inputs
-    rel_tracked = [str(p.relative_to(drive_paths.tracked)) for p in tracked_files]
-    to_copy_tracked: List[str] = []
-    skipped_already_processed: List[str] = []
-
-    for rel in rel_tracked:
-        if _is_processed_on_drive(rel, drive_paths, pose_scoring):
-            skipped_already_processed.append(rel)  # will touch placeholders
-        else:
-            to_copy_tracked.append(rel)
-
-    # Pose files to copy only for tracked files we will process
-    to_copy_pose: List[str] = []
-    if pose_scoring and drive_paths.pose.exists():
-        for rel in to_copy_tracked:
-            pose_rel = rel.replace("tracked.csv", "pose.csv")
-            if (drive_paths.pose / pose_rel).exists():
-                to_copy_pose.append(pose_rel)
-
-    # Estimate ETA for the files we will actually copy
-    est_files_to_copy = len(to_copy_tracked) + len(to_copy_pose)
-    total_input_files = total_tracked + total_pose
-
-    total_bytes = 0
-    for rel in to_copy_tracked:
-        f = drive_paths.tracked / rel
-        try:
-            total_bytes += f.stat().st_size
-        except OSError:
-            pass  # some files may be transient on the mount
-    for rel in to_copy_pose:
-        f = drive_paths.pose / rel
-        try:
-            total_bytes += f.stat().st_size
-        except OSError:
-            pass
-
-    # Adaptive warm-up over the actual to-copy list: 5–10 s and/or ≥100 MB
-    speed_mbps = _warmup_measure_speed_mbps(
-        drive_paths,
-        to_copy_tracked=to_copy_tracked,
-        to_copy_pose=to_copy_pose,
-        min_seconds=5.0,
-        min_megabytes=100.0,
-        max_seconds=10.0,
-    ) or 12.0  # conservative fallback if measurement failed
-
-    if est_files_to_copy > 0 and total_bytes > 0:
-        est_seconds = (total_bytes / (1024 * 1024)) / max(speed_mbps, 0.1)
-        print(
-            f"\n   Estimated: ~{_fmt_seconds(est_seconds)} at {speed_mbps:.1f} MB/s "
-            f"for {est_files_to_copy}/{total_input_files} files"
-        )
-    else:
-        print("\n   Estimated: No new input files to copy")
-
-    # Perform staging
-    t0 = time.perf_counter()
-
-    # Inputs (copy only unprocessed)
-    n_tracked = _copy_selected(drive_paths.tracked, local_paths.tracked, to_copy_tracked)
-    n_pose = 0
-    if pose_scoring and to_copy_pose:
-        n_pose = _copy_selected(drive_paths.pose, local_paths.pose, to_copy_pose)
-
-    # Inputs (placeholders for already-processed files)
-    for rel in skipped_already_processed:
-        p = local_paths.tracked / rel
-        p.parent.mkdir(parents=True, exist_ok=True)
-        if not p.exists():
-            p.touch()  # zero-byte placeholder
-
-    # Pose placeholders for skipped tracked items (if a pose file exists)
-    if pose_scoring and drive_paths.pose.exists():
-        for rel in skipped_already_processed:
-            pose_rel = rel.replace("tracked.csv", "pose.csv")
-            pose_src = drive_paths.pose / pose_rel
-            if pose_src.exists():
-                q = local_paths.pose / pose_rel
-                q.parent.mkdir(parents=True, exist_ok=True)
-                if not q.exists():
-                    q.touch()
-
-    # Existing outputs (placeholders only)
-    n_scored = _mirror_placeholders(drive_paths.scored, local_paths.scored, patterns=("*.csv",))
-    if pose_scoring:
-        _ = _mirror_placeholders(drive_paths.scoredpose, local_paths.scoredpose, patterns=("*.csv",))
-    n_error = _mirror_placeholders(drive_paths.error, local_paths.error, patterns=None)
-
-    if verbose:
-        t1 = time.perf_counter()
-        print(f"\n   Inputs        : Tracked={n_tracked}"
-              f"{', Pose=' + str(n_pose) if pose_scoring else ''}")
-        print(f"   Existing outs : Scored={n_scored}, ScoredError={n_error}")
-        print(f"   Staging time  : {_fmt_seconds(t1 - t0)}")
-        print("\n======================= READY TO RUN =======================")
-
-    return StageSummary(tracked=n_tracked, pose=n_pose, scored=n_scored, error_items=n_error)
-
-#%%% CELL 07 – LOCAL PATHCONFIG REBASE
+#%%% CELL 07B – MIXED PATHCONFIG (INPUTS ON DRIVE, OUTPUTS LOCAL)
 """
 Purpose
-Return a PathConfig-like object rebased under the local root using Path
-objects (not strings) and inject convenience globs computed from those Paths.
-This lets the pipeline run unchanged while targeting local mirrors. Globs are
-generators; iterate them after rebasing.
-
-Steps
-- Convert Drive-based paths to local Path objects.
-- Preserve non-path attributes and callables.
-- Inject gTracked/gPose/gScored/gScoredPose/gError using .rglob().
+Build a PathConfig-like namespace that reads inputs from Drive but writes
+outputs to /content local mirrors (for batched sync).
 """
 
-def make_local_pathconfig(PathConfig, local_paths: LocalPaths):
-    """
-    Rebase every Drive path under the local root and return a namespace with
-    Path objects plus fresh convenience globs. Globs are generators; iterate
-    them after calling this function.
-    """
-    drive_root = Path(PathConfig.pExperimentalRoot)
-    local_root = Path(local_paths.root)
+from types import SimpleNamespace
+from pathlib import Path
 
-    rebased = {}
+def make_mixed_pathconfig(PathConfig, drive_paths: DrivePaths, local_paths: LocalPaths):
+    base = dict(vars(PathConfig))
 
-    for name, value in vars(PathConfig).items():
-        if name.startswith("__"):
-            continue  # skip dunder attributes
-        if callable(value):
-            rebased[name] = value
-            continue
-        try:
-            p = Path(value)
-            rel = p.relative_to(drive_root)
-            rebased[name] = local_root / rel  # keep as Path, not str
-        except Exception:
-            rebased[name] = value  # keep non-path values verbatim
+    def P(x):
+        return x if isinstance(x, Path) else Path(x)
 
-    # Keep Codes path pointing to Drive for clarity in notebooks
+    # Inputs from Drive
+    base["pExperimentalRoot"] = P(drive_paths.root)
+    base["pTracked"]          = P(drive_paths.tracked)
+    base["pPose"]             = P(drive_paths.pose)
+
+    # Outputs to local
+    base["pScored"]       = P(local_paths.scored)
+    base["pScoredPose"]   = P(local_paths.scoredpose)
+    base["pScoredError"]  = P(local_paths.error)
+
+    # Codes stay on Drive
     if hasattr(PathConfig, "pCodes"):
-        rebased["pCodes"] = PathConfig.pCodes
+        base["pCodes"] = getattr(PathConfig, "pCodes")
 
-    # Inject convenience globs rebased to local mirrors
+    # Convenience globs
     try:
-        p_tracked = (rebased["pTracked"] if isinstance(rebased["pTracked"], Path)
-                     else Path(rebased["pTracked"]))
-        p_pose = (rebased["pPose"] if isinstance(rebased["pPose"], Path)
-                  else Path(rebased["pPose"]))
-        p_scored = (rebased["pScored"] if isinstance(rebased["pScored"], Path)
-                    else Path(rebased["pScored"]))
-        p_scoredpose = (rebased["pScoredPose"] if isinstance(rebased["pScoredPose"], Path)
-                        else Path(rebased["pScoredPose"]))
-        p_error = (rebased["pScoredError"] if isinstance(rebased["pScoredError"], Path)
-                   else Path(rebased["pScoredError"]))
+        p_tracked     = P(base["pTracked"])
+        p_pose        = P(base["pPose"])
+        p_scored      = P(base["pScored"])
+        p_scored_pose = P(base["pScoredPose"])
+        p_error       = P(base["pScoredError"])
     except KeyError:
-        # if any required path is missing, skip globs silently
         pass
     else:
-        # note: these are generators; they are evaluated when iterated
-        rebased["gTracked"] = p_tracked.rglob("*tracked.csv")
-        rebased["gPose"] = p_pose.rglob("*pose.csv")
-        rebased["gScored"] = p_scored.rglob("*.csv")
-        rebased["gScoredPose"] = p_scoredpose.rglob("*.csv")
-        rebased["gError"] = p_error.rglob("*.csv")
+        base["gTracked"]    = p_tracked.rglob("*tracked.csv")
+        base["gPose"]       = p_pose.rglob("*pose.csv")
+        base["gScored"]     = p_scored.rglob("*.csv")
+        base["gScoredPose"] = p_scored_pose.rglob("*.csv")
+        base["gError"]      = p_error.rglob("*.csv")
 
-    return SimpleNamespace(**rebased)
+    return SimpleNamespace(**base)
 
 
-#%%% CELL 08 – SYNC OUTPUTS BACK TO DRIVE
+#%%% CELL 08 – FINISH PRINTER (NO SYNC)
 """
 Purpose
-Copy outputs from local → Drive in bulk, skipping placeholders and avoiding
-overwrites when running in upload mode.
-
-Steps
-- Sync Scored and Error outputs; include ScoredPose if enabled.
-- Skip *.tmp and zero-byte placeholders.
+Print the final 75/72-formatted endcap without subrows or syncing.
+Matches your requested output format exactly.
 """
+# Keep the done duck. It celebrates the end of a run.
+def done_duck(i=24): return f"""\n\n\n{' '*(i+9)}__(·)<    ,\n{' '*(i+6)}O  \\_) )   c|_|\n{' '*i}{'~'*27}"""
 
-def sync_outputs_back(
-    local_paths: LocalPaths,
-    drive_paths: DrivePaths,
-    pose_scoring: Optional[bool] = None,
-    *,
-    verbose: bool = False
-) -> None:
-    """
-    Copy outputs from local → Drive in bulk (resilient, skip placeholders).
-    """
-    if pose_scoring is None:
-        pose_scoring = drive_paths.pose.exists() and any(drive_paths.pose.rglob("*.csv"))
+def print_finish(dest_path: str, scoring_seconds: float) -> None:
+    print(done_duck())
+    print(_banner("SCORING AND SAVING COMPLETE"))
+    print()
 
-    t0 = time.perf_counter()
+    L_saved = len("SAVED IN DRIVE")
+    print(_kv_line("SAVED IN DRIVE", str(dest_path), L_saved))
+    print()
 
-    _copy_tree(local_paths.scored, drive_paths.scored, patterns=("*.csv",), upload_mode=True)
-    _copy_tree(local_paths.error, drive_paths.error, patterns=None, upload_mode=True)
-    if pose_scoring:
-        _copy_tree(local_paths.scoredpose, drive_paths.scoredpose, patterns=("*.csv",), upload_mode=True)
+    session_str = _fmt_duration_lettered(max(0.0, float(scoring_seconds or 0.0)))
+    print(_kv_line("SESSION TIME", session_str, L_saved))
+    print()
+    print("=" * 75)
 
-    if verbose:
-        t1 = time.perf_counter()
-        print("\n\n================ SCORING AND SAVING COMPLETE ================")
-        print("\n              Synced outputs back to Drive.")
-        print(f"                 Sync time     : {_fmt_seconds(t1 - t0)}")
 
-#%%% CELL 09 – BACKGROUND SYNC (SILENT, FINAL FILES ONLY)
+#%%% CELL 09 – BACKGROUND SYNC
 """
 Purpose
-Provide a silent background thread that syncs after exactly N new final files
-appear. This reduces manual sync invocations during long runs.
-
-Steps
-- Track seen outputs and compare with the current set every few seconds.
-- Sync after an exact batch of new files is detected.
-- Allow explicit start/stop around a run.
+Keep batch saving capability.
 """
 
-_bg_state = {
-    "thread": None,
-    "stop": threading.Event(),
-    "seen": set(),        # set[str] of files already accounted for
-    "batch_size": 30,
-}
+import threading
+import time
+import shutil
 
-
-def _final_csvs_in_dir(p: Path) -> Set[str]:
-    if not p.exists():
-        return set()
-    return {str(f.resolve()) for f in p.rglob("*.csv") if not f.name.endswith(".tmp")}
-
-
-def _final_outputs_set(local_paths: LocalPaths, pose_scoring: bool) -> Set[str]:
-    s = _final_csvs_in_dir(local_paths.scored) | _final_csvs_in_dir(local_paths.error)
-    if pose_scoring:
-        s |= _final_csvs_in_dir(local_paths.scoredpose)
-    return s
-
+_sync_thread = None
+_stop_sync = False
 
 def start_background_sync(
     local_paths: LocalPaths,
@@ -636,210 +574,74 @@ def start_background_sync(
     pose_scoring: Optional[bool] = None,
     batch_size: int = 30
 ) -> None:
-    """Start a silent background sync that triggers after EXACTLY batch_size new files."""
-    if pose_scoring is None:
-        pose_scoring = drive_paths.pose.exists() and any(drive_paths.pose.rglob("*.csv"))
+    """Start a background thread that syncs new scored files in batches."""
+    global _sync_thread, _stop_sync
+    _stop_sync = False
 
-    if _bg_state["thread"] and _bg_state["thread"].is_alive():
-        return  # already running
-
-    _bg_state["stop"].clear()
-    _bg_state["batch_size"] = int(batch_size)
-    _bg_state["seen"] = _final_outputs_set(local_paths, pose_scoring)
-
-    def _worker():
-        while not _bg_state["stop"].is_set():
+    def _sync_loop():
+        last_count = 0
+        while not _stop_sync:
             time.sleep(5)
-            try:
-                current = _final_outputs_set(local_paths, pose_scoring)
-                new_files = current - _bg_state["seen"]
-                if len(new_files) >= _bg_state["batch_size"]:
-                    try:
-                        sync_outputs_back(local_paths, drive_paths, pose_scoring, verbose=False)
-                    finally:
-                        _bg_state["seen"] = current
-            except Exception:
-                pass  # stay quiet and keep trying
+            scored_files = list(local_paths.scored.rglob("*.csv"))
+            if len(scored_files) - last_count >= batch_size:
+                sync_outputs_back(local_paths, drive_paths, pose_scoring, verbose=False)
+                last_count = len(scored_files)
 
-    t = threading.Thread(target=_worker, daemon=True)
-    _bg_state["thread"] = t
-    t.start()
-
+    _sync_thread = threading.Thread(target=_sync_loop, daemon=True)
+    _sync_thread.start()
 
 def stop_background_sync() -> None:
     """Stop the background sync thread."""
-    if _bg_state["thread"]:
-        _bg_state["stop"].set()
-        _bg_state["thread"].join(timeout=15)
-        _bg_state["thread"] = None
+    global _stop_sync, _sync_thread
+    _stop_sync = True
+    if _sync_thread is not None:
+        _sync_thread.join()
+        _sync_thread = None
 
-#%%% CELL 10 – INTERNAL HELPERS (RESILIENT COPY)
+
+#%%% CELL 10 – SYNC OUTPUTS BACK TO DRIVE
 """
 Purpose
-Implement resilient copying using rsync when available and a Python fallback
-when needed. Handle Drive mount drops with a remount attempt.
-
-Steps
-- Validate CSV folders, copy trees with patterns, and remount on failure.
-- Provide rsync wrapper and simple formatting helpers.
+Push any remaining local outputs to Drive at the end of a run.
 """
 
-def _require_csv_folder(folder: Path, message: str) -> None:
-    if not folder.exists():
-        raise RuntimeError(f"{message}: {folder} (folder not found)")
-    if not any(folder.rglob("*.csv")):
-        raise RuntimeError(f"{message}: {folder} (no CSV files found)")
-
-
-def _copy_tree(
-    src: Path, dst: Path, patterns: Optional[Iterable[str]], *, upload_mode: bool = False
-) -> int:
-    """
-    Copy files from src to dst; return count of files attempted to copy.
-
-    - Prefer rsync. If the mount drops, remount once and retry.
-    - Upload mode: do not overwrite Drive files; skip zero-byte placeholders.
-    """
-    if not src.exists():
-        return 0
-
-    dst.mkdir(parents=True, exist_ok=True)
-
-    # Build candidate file list
-    if patterns is None:
-        candidates = [p for p in src.rglob("*") if p.is_file()]
-    else:
-        candidates = []
-        for pat in patterns:
-            candidates.extend(src.rglob(pat))
-        candidates = [p for p in candidates if p.is_file()]
-
-    file_count = len(candidates)
-    if file_count == 0:
-        return 0
-
-    # Prefer rsync
-    if shutil.which("rsync"):
-        try:
-            _rsync_copy(src, dst, patterns, upload_mode=upload_mode)
-            return file_count
-        except _MountDropError:
-            if _remount_drive():
-                _rsync_copy(src, dst, patterns, upload_mode=upload_mode)
-                return file_count
-            raise RuntimeError(f"Drive remount failed while copying: {src} → {dst}")
-        except Exception:
-            pass  # fall through to Python copy
-
-    # Python fallback with the same rules as rsync mode
-    did_remount = False
-    for path in candidates:
-        rel = path.relative_to(src)
-        out = dst / rel
-        out.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            if upload_mode:
-                try:
-                    if path.stat().st_size == 0:
-                        continue  # skip placeholders
-                except OSError:
-                    continue
-                if out.exists():
-                    continue  # do not overwrite Drive files
-            shutil.copy2(path, out)
-        except OSError as oe:
-            # 107 is a typical "transport endpoint" error on /content/drive
-            if not did_remount and getattr(oe, "errno", None) == 107:
-                did_remount = _remount_drive()
-                if did_remount:
-                    if upload_mode:
-                        try:
-                            if path.stat().st_size == 0:
-                                continue
-                        except OSError:
-                            continue
-                        if out.exists():
-                            continue
-                    shutil.copy2(path, out)
-                    continue
-            raise
-    return file_count
-
-
-def _rsync_copy(
-    src: Path, dst: Path, patterns: Optional[Iterable[str]], *, upload_mode: bool = False
+        
+def sync_outputs_back(
+    local_paths: LocalPaths,
+    drive_paths: DrivePaths,
+    pose_scoring: Optional[bool] = None,
+    verbose: bool = True
 ) -> None:
-    """Copy using rsync and raise _MountDropError on mount-related failures."""
-    cmd = ["rsync", "-a", "--no-compress", "--prune-empty-dirs"]
+    """Sync local scored files back to Drive."""
+    if verbose:
+        print(_banner("SAVING OUTPUTS BACK TO DRIVE"))
+        print()
 
-    # Upload mode: do not overwrite existing files; skip zero-byte placeholders
-    if upload_mode:
-        cmd += ["--ignore-existing", "--min-size=1"]
+    # Sync scored
+    if local_paths.scored.exists():
+        _rsync(local_paths.scored, drive_paths.scored)
+    if pose_scoring and local_paths.scoredpose.exists():
+        _rsync(local_paths.scoredpose, drive_paths.scoredpose)
+    if local_paths.error.exists():
+        _rsync(local_paths.error, drive_paths.error)
 
-    if patterns is None:
-        pass  # copy everything
-    else:
-        pats = set(patterns)
-        if pats == {"*.csv"} or pats == {".csv", "*.csv"}:
-            cmd += ["--include", "*/", "--include", "*.csv", "--exclude", "*"]
-        else:
-            # Fallback handled by caller with Python copy
-            raise RuntimeError("Unsupported include pattern; falling back to Python copy.")
-
+def _rsync(src: Path, dst: Path):
+    """Helper to copy directory tree."""
     dst.mkdir(parents=True, exist_ok=True)
-    src_arg = str(src) + "/"
-    dst_arg = str(dst) + "/"
+    for file in src.rglob("*"):
+        if file.is_file():
+            rel_path = file.relative_to(src)
+            dst_path = dst / rel_path
+            dst_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(file, dst_path)
 
-    proc = subprocess.run(cmd + [src_arg, dst_arg], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    if proc.returncode != 0:
-        err = (proc.stderr or "") + " " + (proc.stdout or "")
-        if ("Transport endpoint is not connected" in err) or ("Input/output error" in err):
-            raise _MountDropError(err)  # signal a remount condition
-        raise RuntimeError(f"rsync failed ({proc.returncode}): {err.strip()}")
-
-
-class _MountDropError(RuntimeError):
-    """Raised when the Drive mount drops during rsync operations."""
-    pass
-
-
-def _remount_drive() -> bool:
-    """Attempt to remount /content/drive; return True when successful."""
-    try:
-        subprocess.run(["fusermount", "-u", "/content/drive"], check=False,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except Exception:
-        pass
-    try:
-        subprocess.run(["rm", "-rf", "/content/drive"], check=False,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except Exception:
-        pass
-    try:
-        from google.colab import drive as colab_drive
-        colab_drive.mount("/content/drive", force_remount=True)
-        return True
-    except Exception:
-        return False
-
-
-def _fmt_seconds(s: float) -> str:
-    """Return HH:MM:SS or MM:SS for short durations."""
-    s = int(round(s))
-    h, rem = divmod(s, 3600)
-    m, sec = divmod(rem, 60)
-    if h:
-        return f"{h:02d}:{m:02d}:{sec:02d}"
-    return f"{m:02d}:{sec:02d}"
 
 #%%% CELL 11 – EXPORTS
 """
 Purpose
-Expose public names that notebooks and runners are expected to import.
-
-Steps
-- Provide data classes and the main staging/sync functions.
+Expose public names needed for no-staging + batched-saving workflow.
 """
+
 __all__ = [
     "DrivePaths",
     "LocalPaths",
@@ -847,21 +649,13 @@ __all__ = [
     "load_configs",
     "validate_inputs",
     "local_mirrors",
-    "stage_to_local",
-    "make_local_pathconfig",
+    "make_mixed_pathconfig",
     "sync_outputs_back",
     "start_background_sync",
     "stop_background_sync",
+    "_banner",
+    "_kv_line",
+    "_fmt_duration_lettered",
+    "done_duck",
+    "print_finish",
 ]
-
-#%%% CELL 12 – EXECUTION GUARD
-"""
-Purpose
-Prevent accidental module execution in Colab; this file is imported by the
-notebook or by a runner script that calls the public functions.
-
-Steps
-- Raise a clear error if executed directly.
-"""
-if __name__ == "__main__":
-    raise RuntimeError("Direct execution not supported – use the Run notebook.")
