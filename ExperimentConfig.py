@@ -33,35 +33,6 @@ Steps
 """
 
 #%% CELL 02 – EXPERIMENT CONFIG
-## Experiment variables
-
-# Enable pose-derived metrics processing
-POSE_SCORING = True  # include pose‑derived metrics from SLEAP
-
-# Stimulus alignment configuration
-ALIGNMENT_COL         = "VisualStim"  # column holding stimulus pulses (0→1)
-STIMULUS_NUMBER       = 20            # expected onsets per run
-STIMULUS_DURATION_SEC = 0.5           # stimulus length (sec)
-EXPECTED_STIMULUS     = STIMULUS_NUMBER + 3  # extra events (e.g. lights‑off)
-
-
-# Timing & arena dimensions
-FRAME_RATE      = 60   # frames per second
-ARENA_WIDTH_MM  = 30   # arena width (millimetres)
-ARENA_HEIGHT_MM = 30   # arena height (millimetres)
-
-# Experimental periods durations (sec)
-EXPERIMENTAL_PERIODS = {
-    "Baseline":    {"duration_sec": 300},
-    "Stimulation": {"duration_sec": 300},
-    "Recovery":    {"duration_sec": 300},
-}
-
-# Filename and grouping metadata
-FILENAME_STRUCTURE = [  # order of fields in scored filenames
-    "Experimenter", "Genotype", "Protocol", "Sex", "Age",
-    "Setup", "Camera", "Date", "FlyID", "Extension",
-]
 
 
 
