@@ -70,7 +70,7 @@ Steps
 from pathlib import Path
 
 # Auto-injected upstream: replace with the real experiment root before use
-pExperimentalRoot = Path("_PLACEHOLDER_EXPERIMENT_ROOT_")
+pExperimentalRoot = Path("/content/drive/.shortcut-targets-by-id/1EvQfnCVnY3B5N4bSdunnJEZzZHMVxaoS/Matheus_e_Rodrigo/exp2/")
 
 def _p(sub: str) -> Path:
     """Return a path under the experimental root."""
