@@ -1,0 +1,3 @@
+# ExperimentConfig.py
+#%% CELL 02 – EXPERIMENT CONFIG
+{{ experiment_config_cell2 }}
