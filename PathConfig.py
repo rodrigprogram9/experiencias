@@ -63,7 +63,7 @@ Import Path and declare a root placeholder that external setup replaces.
 
 Steps
 - Import Path from pathlib.
-- Define pExperimentalRoot using the "__EXP_ROOT__" placeholder.
+- Define pExperimentalRoot using the placeholder.
 - Provide a small helper to build subpaths under the root.
 """
 
@@ -196,3 +196,4 @@ __all__ = [
     "EXPconfig", "BSconfig", "CDFconfig", "PARAMconfig",
     "COLORconfig", "TIMEconfig", "PATHconfig",
 ]
+
