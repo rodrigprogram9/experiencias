@@ -20,7 +20,7 @@ Output
   total_duration_frames (int).
 """
 
-#%%% CELL 01 – GENERAL EXPERIMENT VARIABLES
+#%%% CELL 00 – GENERAL EXPERIMENT VARIABLES
 """
 Purpose
 Define base configuration for alignment, stimuli, timing, arena size, filename
@@ -32,23 +32,9 @@ Steps
 - Provide filename schema and experimental groups.
 """
 
-#%% CELL 02 – EXPERIMENT CONFIG
+#%% CELL 01 – EXPERIMENT CONFIG
 
-GROUP_IDENTIFIER = "Protocol"  # metadata field used for grouping runs
 
-# Experimental groups (keep 'Loom' as protocol label)
-EXPERIMENTAL_GROUPS = {
-    "Control": {
-        "label": "Control",                # group name
-        "idValue": "20Control_3BlackOut",  # identifier in filename metadata
-        "color": "#645769",                # plot color
-    },
-    "Loom": {
-        "label": "Loom",
-        "idValue": "20Loom_3BlackOut",
-        "color": "#E35B29",
-    },
-}
 
 #%%% CELL 02 – DERIVED TIMING VARIABLES
 """
@@ -111,4 +97,5 @@ __all__ = ["POSE_SCORING",
            "frame_span_sec", "stimulus_duration_frames",
            "total_duration_frames", "EXPERIMENTAL_PERIODS",
            "FILENAME_STRUCTURE", "GROUP_IDENTIFIER", "EXPERIMENTAL_GROUPS"]
+
 
